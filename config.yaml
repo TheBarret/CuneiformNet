@@ -1,0 +1,12 @@
+# Random seed for reproducibility
+seed: 1
+
+# Training Hyperparameters
+batch_size: 32
+learning_rate: 0.001
+epochs: 50
+
+# Model Configuration
+input_size: 32
+input_channels: 1
+num_classes: 32  # 32-bit representation
