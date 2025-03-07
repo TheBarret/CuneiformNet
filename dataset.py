@@ -23,6 +23,7 @@ SETTINGS = {
         "FONT_OFFSET_X": 10,          # Control the y-axis of the font center
         "ROTATION_RANGE": (-45, 45),  # Rotational noise (Degrees)
         "NOISE_LEVEL": 15,            # Pixel intensity noise
+        "CAT": "Cuneiform",
     },
     "colab": {
         "IMAGE_SIZE": (128, 128),
@@ -38,6 +39,7 @@ SETTINGS = {
         "FONT_OFFSET_X": 10,          # Control the y-axis of the font center
         "ROTATION_RANGE": (-45, 45),  # Rotational noise (Degrees)
         "NOISE_LEVEL": 15,            # Pixel intensity noise
+        "CAT": "Cuneiform",
     }
 }
 
@@ -110,7 +112,7 @@ def generate_cuneiform_images():
                 "symbol": symbol,
                 "code": code_point,
                 "description": fetch_symbol_description(code_point),
-                "category": "Cuneiform",
+                "category": config["CAT"],
                 "type": "original",
             }
 
