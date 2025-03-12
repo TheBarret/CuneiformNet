@@ -1,12 +1,15 @@
 # Random seed for reproducibility
-seed: 234124
+seed: 73923510
 
 # Training Hyperparameters
 batch_size: 64
-learning_rate: 0.001
-epochs: 50
+learning_rate: 0.002
+epochs: 100
 
 # Model Configuration
-input_size: 64
-input_channels: 1
-num_classes: 32  # 32-bit representation
+input_size: 256  # match resolution
+input_channels: 1  # match grayscale channel
+
+# CUNEIFORM_START - CUNEIFORM_END
+# 0x12000 to 0x12000 + 0x400 (1024 symbols in production)
+num_classes: 1024
