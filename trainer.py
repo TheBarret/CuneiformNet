@@ -13,8 +13,9 @@ import logging
 from datetime import datetime
 import yaml
 
-# Settings
-DATASET_SHAPE = (64, 64)
+# Dataset Settings 
+# Adhere to dataset.py/config.yaml globals
+DATASET_SHAPE = (256, 256)
 
 # Configure logging
 logging.basicConfig(
@@ -26,39 +27,20 @@ logger = logging.getLogger(__name__)
 
 # Configuration Management
 class ConfigManager:
-    def __init__(self, config_path='config.yaml'):
+    def __init__(self, config_path='/content/config.yaml'):
         with open(config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         
-        # Ensure reproducibility
         torch.manual_seed(self.config['seed'])
         np.random.seed(self.config['seed'])
 
     def get(self, key):
         return self.config.get(key)
 
-def load_json_with_encoding(file_path):
-    encodings = [
-        'utf-8',      # Most common modern encoding
-        'latin-1',    # Fallback encoding that can read most byte sequences
-        'cp1252',     # Windows default encoding
-        'utf-16',     # Unicode encoding
-        'utf-8-sig'   # UTF-8 with Byte Order Mark
-    ]
-    for encoding in encodings:
-        try:
-            with open(file_path, 'r', encoding=encoding) as f:
-                print(f'Opening JSON [encoding: {encoding}]')
-                return json.load(f)
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to load JSON with {encoding} encoding: {e}")
-    raise ValueError(f"Could not load JSON file {file_path} with any known encoding")
-
 # Custom Dataset for Cuneiform Images
 class CuneiformDataset(Dataset):
     def __init__(self, image_dir, metadata_path, transform=None):
         self.image_dir = image_dir
-
         self.transform = transform or transforms.Compose([
             transforms.Resize(DATASET_SHAPE),
             transforms.Grayscale(),
@@ -66,23 +48,15 @@ class CuneiformDataset(Dataset):
             transforms.Normalize(mean=[0.5], std=[0.5])
         ])
         
-        # Load metadata
-        #with open(metadata_path, 'r') as f:
-        #    self.metadata = json.load(f)
-        self.metadata = load_json_with_encoding(metadata_path)
+        with open(metadata_path, 'r') as f:
+            self.metadata = json.load(f)
         
-        # Prepare image paths and labels
-        self.image_paths = []
-        self.labels = []
-        
+        self.image_paths, self.labels = [], []
         for filename, info in self.metadata.items():
             full_path = os.path.join(image_dir, filename)
             if os.path.exists(full_path):
-                # Extract hexadecimal number from filename
                 label_number = int(filename.split('_')[1].split('.')[0], 16)
-
-                # Convert to binary representation
-                label_binary = [int(bit) for bit in f'{label_number:032b}']
+                label_binary = [int(bit) for bit in f'{label_number:010b}']  # 10 bits for 1024 classes
                 
                 self.image_paths.append(full_path)
                 self.labels.append(torch.tensor(label_binary, dtype=torch.float32))
@@ -93,144 +67,80 @@ class CuneiformDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        image = Image.open(self.image_paths[idx]).convert('L')  # Grayscale
+        image = Image.open(self.image_paths[idx]).convert('L')
         image = self.transform(image)
         return image, self.labels[idx]
 
 class CuneiformNet(nn.Module):
-    def __init__(self, num_classes=32):
+    def __init__(self, num_classes=1024):  # Updated to 1024 classes
         super(CuneiformNet, self).__init__()
-        # Multi-scale feature extraction
-        self.multi_scale_features = nn.ModuleList([
-            # Different kernel sizes to capture varied line thicknesses
-            nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=1, padding=0),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True)
-            ),
-            nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True)
-            ),
-            nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=5, padding=2),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True)
-            )
-        ])
-        
-        # Attention mechanism to focus on important features
-        self.feature_attention = nn.Sequential(
-            nn.Conv2d(96, 96, kernel_size=1),
-            nn.BatchNorm2d(96),
-            nn.Sigmoid()
-        )
-        
-        # Detailed feature extraction
-        self.detailed_features = nn.Sequential(
-            # Deeper and more complex feature extraction
-            nn.Conv2d(96, 128, kernel_size=3, padding=1),
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+            
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.MaxPool2d(2, 2),
             
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            
-            # Dilated convolutions to capture wider context
-            nn.Conv2d(256, 512, kernel_size=3, padding=2, dilation=2),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True)
+            nn.MaxPool2d(2, 2)
         )
         
-        # Advanced classifier with more complexity
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 16 * 16, 2048),  # Changed from 512 * 8 * 8
+            nn.Linear(256 * 8 * 8, 1024),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.BatchNorm1d(2048),
-            
-            nn.Linear(2048, 1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.4),
-            nn.BatchNorm1d(1024),
-            
+            nn.Dropout(0.6),
             nn.Linear(1024, num_classes),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        # Multi-scale feature extraction
-        multi_scale_features = [scale(x) for scale in self.multi_scale_features]
-        
-        # Concatenate multi-scale features
-        combined_features = torch.cat(multi_scale_features, dim=1)
-        
-        # Apply attention mechanism
-        attention_map = self.feature_attention(combined_features)
-        focused_features = combined_features * attention_map
-        
-        # Further feature extraction
-        detailed_features = self.detailed_features(focused_features)
-        
-        # Flatten and classify
-        flattened = torch.flatten(detailed_features, 1)
-        return self.classifier(flattened)
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        return self.classifier(x)
 
 def train_model(config_manager):
-    # Device configuration
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
-
-    # Dataset and DataLoader
+    
     dataset = CuneiformDataset(
-        image_dir=".\\images\\", 
-        metadata_path=".\\images\\cuneiform.json"
+        image_dir="/content/images", 
+        metadata_path="/content/images/cuneiform.json"
     )
     
-    # Split dataset
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-
+    
+    # Adjust batch size for T4
+    batch_size = min(32, config_manager.get('batch_size'))  # Reduced batch size for T4
+    num_workers = 2
+    
     train_loader = DataLoader(
-        train_dataset, 
-        batch_size=config_manager.get('batch_size'), 
-        shuffle=True, 
-        num_workers=4
-    )
+        train_dataset, batch_size=batch_size, shuffle=True, 
+        num_workers=num_workers, pin_memory=True)
     val_loader = DataLoader(
-        val_dataset, 
-        batch_size=config_manager.get('batch_size'), 
-        shuffle=False, 
-        num_workers=4
-    )
-
-    # Model, Loss, Optimizer
-    model = CuneiformNet().to(device)
+        val_dataset, batch_size=batch_size, shuffle=False, 
+        num_workers=num_workers, pin_memory=True)
+        
+    # Updated to 1024 classes
+    model = CuneiformNet(num_classes=1024).to(device)  
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(
-        model.parameters(), 
-        lr=config_manager.get('learning_rate')
+    optimizer = optim.Adam(model.parameters(), lr=config_manager.get('learning_rate'), weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='min',        # Lower validation loss is better
+        factor=0.5,        # Reduce LR by half
+        patience=5,        # Wait 5 epochs before reducing LR
+        threshold=0.01,    # Minimum change to count as improvement
     )
-    
-    # Learning Rate Scheduler
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        # optimizer, 
-        # mode='min', 
-        # factor=0.1, 
-        # patience=5
-    # )
-    
-
-    # Training Loop
     num_epochs = config_manager.get('epochs')
     best_val_loss = float('inf')
-    
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
     for epoch in range(num_epochs):
         model.train()
@@ -244,40 +154,28 @@ def train_model(config_manager):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-
+            
             train_loss += loss.item()
-
-        # Validation
-        model.eval()
+        
         val_loss = 0.0
+        model.eval()
         with torch.no_grad():
             for images, labels in val_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 val_loss += criterion(outputs, labels).item()
-
+        
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
-
-        logger.info(f'Epoch [{epoch+1}/{num_epochs}], '
-                    f'Train Loss: {train_loss:.4f}, '
-                    f'Val Loss: {val_loss:.4f}')
-
         scheduler.step(val_loss)
-
-        # Model Checkpointing
+        
+        logger.info(f'Epoch [{epoch+1}/{num_epochs}] Train Loss: {train_loss:.4f} Val Loss: {val_loss:.4f}')
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_save_path = f'cuneiform_model_{timestamp}.pth'
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'epoch': epoch,
-                'loss': best_val_loss
-            }, model_save_path)
-            logger.info(f'Model saved to {model_save_path}')
-
+            torch.save(model.state_dict(), '/content/cuneiform_model_latest.pth')
+            logger.info('Model saved.')
+    
     logger.info("Training completed successfully!")
 
 def main():
