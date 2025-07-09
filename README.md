@@ -1,10 +1,7 @@
 # CuneiformNet
 Neural Network & Cuneiform Symbols
 
-![image](https://github.com/user-attachments/assets/9a7286e6-13b8-4483-bb1f-3c173d513853)
-
-
-Work in progress, very alpha!
+Low prio project for now.
 
 ![image](https://github.com/user-attachments/assets/ad13cc06-5757-4cf9-bbed-db98493a598e)
 
